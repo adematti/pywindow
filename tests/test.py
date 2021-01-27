@@ -20,30 +20,33 @@ def get_radial_edges(rwidth,zrange,cosmo):
 	return scipy.linspace(dmin,dmax,nbins+1)
 
 def prepare_catalogue(path_input,ic=None,ncuts=1,downsample=2.,**params):
-	
+	"""
+	For a power normalisation I2, ``catalogue.attrs['norm']`` should be set to``I2/sum(wdata**2)``.
+	This does not matter for the correlation function, since the normalisation of integral constraint window functions cancels with that of survey geometry.
+	"""
 	catalogue = Catalogue.from_fits(path_input)
 	catalogue['Weight'] = catalogue['WEIGHT_SYSTOT']*catalogue['WEIGHT_CP']*catalogue['WEIGHT_NOZ']*catalogue['WEIGHT_FKP']
-	
+
 	from nbodykit.lab import transform
 	cosmo = get_cosmo_BOSS()
 	catalogue.logger.info('Omega0_m: {:.4g}.'.format(cosmo.Omega0_m))
 	catalogue['Position'] = transform.SkyToCartesian(catalogue['RA'],catalogue['DEC'],catalogue['Z'],cosmo=cosmo,degrees=True).compute()
 	catalogue.attrs['norm'] = 1. # for a power normalisation I2, should be I2/sum(wdata**2)
-	
+
 	catalogue.logger.info('Box size: {:.4g} Mpc/h.'.format(catalogue.boxsize()))
-	
+
 	catalogue.logger.info('Shuffling.')
 	catalogue.shuffle(seed=78987) # shuffling the catalogue to avoid selecting a peculiar subsample with further cuts
-	
+
 	catalogue = catalogue.downsample(factor=downsample,seed=42)
-	
+
 	path_randoms = params['path_randoms']['alpha']
 	catalogue.save(path_randoms,keep=['Position','Weight'])
-	
+
 	rr = BaseCount(**params)
 	# in additional_bins, you should put extra selections where the integral constraint is enforced, e.g. for the ELGs, a list of functions selecting the different chunk_z
 	rr.prepare_catalogues(path_randoms,params['path_randoms'],ic=ic,additional_bins=[],ncuts=ncuts,share='flat')
-	
+
 
 if __name__ == '__main__':
 
@@ -63,7 +66,7 @@ if __name__ == '__main__':
 	redges = get_radial_edges(rwidth,[0.6,1.0],get_cosmo_BOSS())
 	ncuts = 3 # to split calculation in ncuts parts, convenient to distribute job on many nodes
 	downsample = 0.0001 # base downsampling of the random catalogue, very small for testing purposes
-	
+
 	parameters = {}
 	parameters['RR'] = {}
 	parameters['RR']['sedges'] = scipy.linspace(0.,boxsize,int(boxsize)+1)
@@ -75,7 +78,7 @@ if __name__ == '__main__':
 	parameters['RR']['path_randoms'] = {'alpha':'randoms_RR.npy'}
 	parameters['RR']['save'] = ['RR_{:d}.npy'.format(icut) for icut in range(ncuts)]
 	parameters['RR']['save_window'] = 'window_RR.npy'
-	
+
 	parameters['RRRrad'] = {}
 	parameters['RRRrad']['sedges'] = scipy.linspace(0.,boxsize,1001)
 	parameters['RRRrad']['ells'] = [0,2,4,5,6,8]
@@ -88,7 +91,7 @@ if __name__ == '__main__':
 	parameters['RRRrad']['path_randoms'] = {'alpha':'randoms_RRRrad.npy','radial':'randoms_RRRrad_radial.npy'}
 	parameters['RRRrad']['save'] = ['RRRrad_{:d}.npy'.format(icut) for icut in range(ncuts)]
 	parameters['RRRrad']['save_window'] = 'window_RRRrad.npy'
-	
+
 	parameters['RRRradRrad'] = {}
 	parameters['RRRradRrad']['sedges'] = scipy.linspace(0.,boxsize,1001)
 	parameters['RRRradRrad']['ells'] = [0,2,4,5,6,8]
@@ -101,7 +104,7 @@ if __name__ == '__main__':
 	parameters['RRRradRrad']['path_randoms'] = {'alpha':'randoms_RRRradRrad.npy','radial':'randoms_RRRradRrad_radial.npy'}
 	parameters['RRRradRrad']['save'] = ['RRRradRrad_{:d}.npy'.format(icut) for icut in range(ncuts)]
 	parameters['RRRradRrad']['save_window'] = 'window_RRRradRrad.npy'
-	
+
 	parameters['RRRradSN'] = {}
 	parameters['RRRradSN']['sedges'] = scipy.linspace(0.,boxsize,1001)
 	parameters['RRRradSN']['ells'] = [0,2,4,5,6,8]
@@ -112,7 +115,7 @@ if __name__ == '__main__':
 	parameters['RRRradSN']['path_randoms'] = {'alpha':'randoms_RRRradSN.npy','radial':'randoms_RRRradSN_radial.npy'}
 	parameters['RRRradSN']['save'] = ['RRRradSN_{:d}.npy'.format(icut) for icut in range(ncuts)]
 	parameters['RRRradSN']['save_window'] = 'window_RRRradSN.npy'
-	
+
 	parameters['RRRradRradSN'] = {}
 	parameters['RRRradRradSN']['sedges'] = scipy.linspace(0.,boxsize,1001)
 	parameters['RRRradRradSN']['ells'] = [0,2,4,5,6,8]
@@ -123,7 +126,7 @@ if __name__ == '__main__':
 	parameters['RRRradRradSN']['path_randoms'] = {'alpha':'randoms_RRRradRradSN.npy','radial':'randoms_RRRradRradSN_radial.npy'}
 	parameters['RRRradRradSN']['save'] = ['RRRradRradSN_{:d}.npy'.format(icut) for icut in range(ncuts)]
 	parameters['RRRradRradSN']['save_window'] = 'window_RRRradSN.npy'
-	
+
 	# kernel of the first term in Eq. 2.20 of arXiv:1904.08851
 	if 'RR' in todo:
 		# to obtain RR pair counts
@@ -141,10 +144,10 @@ if __name__ == '__main__':
 		rr.rebin(4) # you can rebin to another bin size
 		window = rr.to_window()
 		window.save(params['save_window'])
-	
+
 	# kernel of the second and third terms in Eq. 2.20 of arXiv:1904.08851
 	if 'RRRrad' in todo:
-		
+
 		params = parameters['RRRrad']
 		# save catalogue
 		prepare_catalogue(path_input,ic='radial',ncuts=ncuts,downsample=downsample/2.,**params)
@@ -158,7 +161,7 @@ if __name__ == '__main__':
 		for save in params['save']: rr += Real3PCFBinned.load(save)
 		window = rr.to_window()
 		window.save(params['save_window'])
-	
+
 	# kernel of the fourth term in Eq. 2.20 of arXiv:1904.08851
 	if 'RRRradRrad' in todo:
 
@@ -176,14 +179,14 @@ if __name__ == '__main__':
 		for save in params['save']: rr += Real4PCFBinned.load(save)
 		window = rr.to_window()
 		window.save(params['save_window'])
-	
+
 	# now the shot noise for each of the integral constraint terms
 	if 'RRRradSN' in todo:
 
 		params = parameters['RRRradSN']
 		# save catalogue
 		prepare_catalogue(path_input,ic='radial',ncuts=ncuts,downsample=2.*downsample,**params)
-		# compute RR 2pcf	
+		# compute RR 2pcf
 		params = parameters['RRRradSN']
 		for icut in range(ncuts):
 			rr = Real3PCFBinnedShotNoise(**params)
@@ -200,7 +203,7 @@ if __name__ == '__main__':
 		params = parameters['RRRradRradSN']
 		# save catalogue
 		prepare_catalogue(path_input,ic='radial',ncuts=ncuts,downsample=2.*downsample,**params)
-		# compute RR 2pcf	
+		# compute RR 2pcf
 		params = parameters['RRRradRradSN']
 		for icut in range(ncuts):
 			rr = Real4PCFBinnedShotNoise(**params)
@@ -211,7 +214,7 @@ if __name__ == '__main__':
 		for save in params['save']: rr += Real4PCFBinnedShotNoise.load(save)
 		window = rr.to_window()
 		window.save(params['save_window'])
-		
+
 	# trick: you can also compute windows with different random densities (to better sample small scales) and merge them using window_total |= window
 	# finally, sum all all windows:
 	path_window_rad = 'window_rad.npy'
@@ -220,17 +223,17 @@ if __name__ == '__main__':
 		window = WindowFunction.load(parameters['RRRrad']['save_window'])
 		window -= WindowFunction.load(parameters['RRRradRrad']['save_window'])
 		window.save(save=path_window_rad)
-		
+
 		window = WindowFunction.load(parameters['RRRradSN']['save_window'])
 		window -= WindowFunction.load(parameters['RRRradRradSN']['save_window'])
 		window.save(save=path_window_radSN)
-	
+
 	# for the Landy-Szalay estimator, one must divide window_rad and window_radSN by the window function RR
 	path_window_rad_ls = 'window_rad_ls.npy'
 	path_window_radSN_ls = 'window_radSN_ls.npy'
 	if 'windowRadLS' in todo:
 		mu = scipy.linspace(0.,1.,100)
-		
+
 		window = WindowFunction.load(path_window_rad)
 		windowrr = WindowFunction.load(parameters['RR']['save_window'])
 		wmurr = 0
@@ -244,7 +247,7 @@ if __name__ == '__main__':
 			for ill2,ell2 in enumerate(window.ells[1]): toret.window[toret.index((ell1,ell2))] = (2.*ell2+1.)*integrate.trapz(wmu*special.legendre(ell2)(mu),x=mu,axis=-1)
 		toret.window[scipy.isnan(toret.window) | scipy.isinf(toret.window)] = 0.
 		toret.save(path_window_rad_ls)
-		
+
 		window = WindowFunction.load(path_window_radSN)
 		windowrr = WindowFunction.load(parameters['RR']['save_window'])
 		wmurr = 0
@@ -257,11 +260,11 @@ if __name__ == '__main__':
 		for ill2,ell2 in enumerate(window.ells): toret.window[toret.index(ell2)] = (2.*ell2+1.)*integrate.trapz(wmu*special.legendre(ell2)(mu),x=mu,axis=-1)
 		toret.window[scipy.isnan(toret.window) | scipy.isinf(toret.window)] = 0.
 		toret.save(path_window_radSN_ls)
-	
+
 	# let's just check that the integration of the 2D window function over the first dimension yields the RR window function
 	if 'plot' in todo:
 		plot.plot_window_function_2d_projected(path_window_rad,parameters['RR']['save_window'],divide=False,scale='sloglin',title='Window function',path='projected_window.png')
-	
+
 	'''
 	To obtain the integral constraint, Eq. 2.18 of arXiv:1904.08851 (W being window_rad_ls.npy), see integral_contraint.py, class ConvolvedIntegralConstraint, to be subtracted from the correlation function.
 	'window_radSN_ls.npy' should be multiplied by the shot noise of your sample to obtain the real space shot noise contribution, to be subtracted from the correlation function.
