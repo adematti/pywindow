@@ -322,7 +322,9 @@ if __name__ == '__main__':
 
 		convolution = ConvolutionMultipole()
 		convolution.set_window(path_window={0:'window_RR.npy'})
-		convolution.set_grid(s=s,ellsin=ellsout,ellsout=ellsout)
+		# s is the separation array corresponding to the tabulated multipoles Xil, ellsin the input multipoles (Xil is of shape (len(ellsin),len(s)))
+		# ellsout are the output multipoles
+		convolution.set_grid(s=s,ellsin=ellsin,ellsout=ellsout)
 		Xilc = convolution.convolve(Xil)
 
 	b) for the integral constraint correction, Eq. 2.18 of arXiv:1904.08851, see :class:`integral_contraint.ConvolvedIntegralConstraint`, where you input path_window={0:'window_rad.npy','SN':'window_radSN.npy'}
@@ -330,7 +332,9 @@ if __name__ == '__main__':
 
 		cic = ConvolvedIntegralConstraint()
 		cic.set_window(path_window={0:'window_rad.npy','SN':'window_radSN.npy'})
-		cic.set_grid(s=s,d=d,ellsin=ellsout,ellsout=ellsout)
+		# s is the separation array corresponding to the tabulated multipoles Xil, ellsin (e.g. [0,2,4]) the input multipoles (Xil is of shape (len(ellsin),len(s)))
+		# d (delta in Eq. 2.18 of arXiv:1904.08851) is the separation range where to integrate Xil (typically small scales to the survey size), ellsout (e.g. [0,2,4]) are the output multipoles
+		cic.set_grid(s=s,d=d,ellsin=ellsin,ellsout=ellsout)
 		Xilcic = Xilc - cic.ic(Xil) - cic.real_shotnoise*shotnoise # final model correlation function, to be Hankel transformed back to power spectrum
 
 	Correlation function:
@@ -339,6 +343,8 @@ if __name__ == '__main__':
 
 		cic = ConvolvedIntegralConstraint()
 		cic.set_window(path_window={0:'window_rad_ls.npy','SN':'window_radSN_ls.npy'})
+		# s is the separation array corresponding to the tabulated multipoles Xil, ellsin (e.g. [0,2,4]) the input multipoles (Xil is of shape (len(ellsin),len(s)))
+		# d (delta in Eq. 2.18 of arXiv:1904.08851) is the separation range where to integrate Xil (typically small scales to the survey size), ellsout (e.g. [0,2,4]) are the output multipoles
 		cic.set_grid(s=s,d=d,ellsin=ellsout,ellsout=ellsout)
 		Xilic = Xil - cic.ic(Xil) - cic.real_shotnoise*shotnoise # final model correlation function
 	"""
