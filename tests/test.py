@@ -5,7 +5,43 @@ from scipy import special,integrate
 from pywindow import *
 from pywindow import plot
 
-def get_cosmo_BOSS():
+# Example with a fake catalog
+def make_initial_catalogue(path):
+	from pywindow.catalogue import sky_to_cartesian
+	rng = scipy.random.RandomState(seed=42)
+	rmin,rmax = 2000.,3000.
+	size = 100000
+	catalogue = Catalogue()
+	distance = rng.uniform(2000.,3000.,size=size)
+	ramin,ramax,decmin,decmax = 0.,30.,-15,15.
+	u1,u2 = rng.uniform(size=(2,size))
+	cmin = scipy.sin(scipy.deg2rad(decmin))
+	cmax = scipy.sin(scipy.deg2rad(decmax))
+	ra = ramin + u1*(ramax-ramin)
+	dec = 90.-scipy.rad2deg(scipy.arccos(cmin+u2*(cmax-cmin)))
+	catalogue['Position'] = sky_to_cartesian(distance,ra,dec)
+	catalogue['Weight'] = catalogue.ones()
+	decfrac = scipy.diff(scipy.sin(scipy.deg2rad([decmin,decmax])),axis=0)
+	rafrac = scipy.diff(scipy.deg2rad([ramin,ramax]),axis=0)
+	area = decfrac*rafrac
+	catalogue['NZ'] = catalogue['Weight'].sum()/(area*(rmax-rmin))/distance**2
+	catalogue.to_fits(path)
+
+def prepare_catalogue(path_input,ic=None,ncuts=1,downsample=2.,**params):
+	catalogue = Catalogue.from_fits(path_input)
+	catalogue.attrs['norm'] = scipy.sum(catalogue['NZ']*catalogue['Weight'])/scipy.sum(catalogue['Weight']**2) # for a power normalisation I2, should be I2/sum(wdata**2)
+	catalogue.logger.info('Box size: {:.4g} Mpc/h.'.format(catalogue.boxsize()))
+	catalogue.logger.info('Shuffling.')
+	catalogue.shuffle(seed=78987) # shuffling the catalogue to avoid selecting a peculiar subsample with further cuts
+	catalogue = catalogue.downsample(factor=downsample,seed=42)
+	path_randoms = params['path_randoms']['alpha']
+	catalogue.save(path_randoms,keep=['Position','Weight'])
+	rr = BaseCount(**params)
+	# in additional_bins, you should put extra selections where the integral constraint is enforced, e.g. for the ELGs, a list of functions selecting the different chunk_z
+	rr.prepare_catalogues(path_randoms,params['path_randoms'],ic=ic,additional_bins=[],ncuts=ncuts,share='flat')
+
+# For an eBOSS-like catalog
+def get_cosmo_eBOSS():
 	from nbodykit.lab import cosmology
 	cosmo_kwargs = dict(Omega_m=0.31,omega_b=0.022,h=0.676,sigma8=0.8,n_s=0.97,N_ur=2.0328,m_ncdm=[0.06])
 	cosmo_kwargs['Omega0_b'] = cosmo_kwargs.pop('omega_b')/cosmo_kwargs['h']**2
@@ -14,21 +50,21 @@ def get_cosmo_BOSS():
 	cosmo = cosmology.Cosmology(**cosmo_kwargs).match(Omega0_m=Omega0_m).match(sigma8=sigma8)
 	return cosmo
 
-def get_radial_edges(rwidth,zrange,cosmo):
-	dmin,dmax = cosmo.comoving_distance(zrange)
+def get_radial_edges(rwidth,drange):
 	nbins = scipy.rint((dmax-dmin)/rwidth).astype(int)
 	return scipy.linspace(dmin,dmax,nbins+1)
 
-def prepare_catalogue(path_input,ic=None,ncuts=1,downsample=2.,**params):
+def prepare_catalogue_from_eBOSS(path_input,ic=None,ncuts=1,downsample=2.,**params):
 	"""
 	For a power normalisation I2, ``catalogue.attrs['norm']`` should be set to``I2/sum(wdata**2)``.
 	This does not matter for the correlation function, since the normalisation of integral constraint window functions cancels with that of survey geometry.
 	"""
 	catalogue = Catalogue.from_fits(path_input)
+	# catalog total weight
 	catalogue['Weight'] = catalogue['WEIGHT_SYSTOT']*catalogue['WEIGHT_CP']*catalogue['WEIGHT_NOZ']*catalogue['WEIGHT_FKP']
 
 	from nbodykit.lab import transform
-	cosmo = get_cosmo_BOSS()
+	cosmo = get_cosmo_eBOSS()
 	catalogue.logger.info('Omega0_m: {:.4g}.'.format(cosmo.Omega0_m))
 	catalogue['Position'] = transform.SkyToCartesian(catalogue['RA'],catalogue['DEC'],catalogue['Z'],cosmo=cosmo,degrees=True).compute()
 	catalogue.attrs['norm'] = 1. # for a power normalisation I2, should be I2/sum(wdata**2)
@@ -52,20 +88,34 @@ if __name__ == '__main__':
 
 	setup_logging()
 
-	os.chdir('./files/')
-	path_input = 'eBOSS_LRG_clustering_NGC_v5.ran.fits'
-
 	todo = []
 	todo += ['RR','RRRrad','RRRradRrad']
 	todo += ['RRRradSN','RRRradRradSN']
 	todo += ['windowRad','windowRadLS']
 	todo += ['plot']
 
-	boxsize = 5000. # large enough to encompass all the sample
-	rwidth = 50. # 2 Mpc/h bins for the radial IC is a fair choice, 50 for testing purposes
-	redges = get_radial_edges(rwidth,[0.6,1.0],get_cosmo_BOSS())
+	base_dir = './files/'
+	utils.mkdir(base_dir)
+	os.chdir(base_dir)
+
+	cat = 'std'
+	if cat == 'eBOSS':
+		path_input = 'eBOSS_LRG_clustering_NGC_v5.ran.fits' # this catalog should be in ./files/
+		boxsize = 5000. # large enough to encompass all the sample
+		rwidth = 50. # 2 Mpc/h bins for the radial IC is a fair choice, 50 for testing purposes
+		cosmo = get_cosmo_eBOSS()
+		dmin,dmax = cosmo.comoving_distance(zrange)
+		downsample = 0.0001 # base downsampling of the random catalogue, very small for testing purposes
+	else:
+		path_input = 'catalogue.fits'
+		make_initial_catalogue(path_input)
+		boxsize = 5000. # large enough to encompass all the sample
+		rwidth = 50. # 2 Mpc/h bins for the radial IC is a fair choice, 50 for testing purposes
+		dmin,dmax = 2000.,3000.
+		ncuts = 3 # to split calculation in ncuts parts, convenient to distribute job on many nodes
+		downsample = 0.1 # base downsampling of the random catalogue, very small for testing purposes
+	redges = get_radial_edges(rwidth,[dmin,dmax])
 	ncuts = 3 # to split calculation in ncuts parts, convenient to distribute job on many nodes
-	downsample = 0.0001 # base downsampling of the random catalogue, very small for testing purposes
 
 	parameters = {}
 	parameters['RR'] = {}
@@ -265,8 +315,30 @@ if __name__ == '__main__':
 	if 'plot' in todo:
 		plot.plot_window_function_2d_projected(path_window_rad,parameters['RR']['save_window'],divide=False,scale='sloglin',title='Window function',path='projected_window.png')
 
-	'''
-	To obtain the integral constraint, Eq. 2.18 of arXiv:1904.08851 (W being window_rad_ls.npy), see integral_contraint.py, class ConvolvedIntegralConstraint, to be subtracted from the correlation function.
-	'window_radSN_ls.npy' should be multiplied by the shot noise of your sample to obtain the real space shot noise contribution, to be subtracted from the correlation function.
-	For the window function effect alone, Eq. 2.10 of arXiv:1904.08851, see window_convolution.py.
-	'''
+	"""
+	Power spectrum:
+	a) for the window function effect alone, Eq. 2.10 of arXiv:1904.08851, see :class:`window_convolution.ConvolutionMultipole`, where you input path_window={0:'window_RR.npy'}.
+	then you call :meth:`window_convolution.ConvolutionMultipole.convolve` on the correlation function ``Xil``::
+
+		convolution = ConvolutionMultipole()
+		convolution.set_window(path_window={0:'window_RR.npy'})
+		convolution.set_grid(s=s,ellsin=ellsout,ellsout=ellsout)
+		Xilc = convolution.convolve(Xil)
+
+	b) for the integral constraint correction, Eq. 2.18 of arXiv:1904.08851, see :class:`integral_contraint.ConvolvedIntegralConstraint`, where you input path_window={0:'window_rad.npy','SN':'window_radSN.npy'}
+	then you need to subtract :meth:`integral_contraint.ConvolvedIntegralConstraint.ic` and :attr:`integral_contraint.ConvolvedIntegralConstraint.real_shotnoise` multiplied by shotnoise from your correlation function ``Xil``.
+
+		cic = ConvolvedIntegralConstraint()
+		cic.set_window(path_window={0:'window_rad.npy','SN':'window_radSN.npy'})
+		cic.set_grid(s=s,d=d,ellsin=ellsout,ellsout=ellsout)
+		Xilcic = Xilc - cic.ic(Xil) - cic.real_shotnoise*shotnoise # final model correlation function, to be Hankel transformed back to power spectrum
+
+	Correlation function:
+	a) for the integral constraint correction, Eq. 2.18 of arXiv:1904.08851, see :class:`integral_contraint.ConvolvedIntegralConstraint`, where you input path_window={0:'window_rad_ls.npy','SN':'window_radSN_ls.npy'}
+	then you need to subtract :meth:`integral_contraint.ConvolvedIntegralConstraint.ic` and :attr:`integral_contraint.ConvolvedIntegralConstraint.real_shotnoise` multiplied by shotnoise from your correlation function ``Xil``.
+
+		cic = ConvolvedIntegralConstraint()
+		cic.set_window(path_window={0:'window_rad_ls.npy','SN':'window_radSN_ls.npy'})
+		cic.set_grid(s=s,d=d,ellsin=ellsout,ellsout=ellsout)
+		Xilic = Xil - cic.ic(Xil) - cic.real_shotnoise*shotnoise # final model correlation function
+	"""
